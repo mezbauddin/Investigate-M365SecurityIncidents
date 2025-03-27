@@ -1,5 +1,5 @@
 # Investigate-ExchangeSecurityIncidents.ps1
-# Author: Mezba Uddin | MVP | https://mezbauddin.com
+# Author: Mezba Uddin | MVP | https://mrmicrosoft.com
 # Description: Interactive Exchange Online Security Response Tool using Microsoft Graph API and Exchange Online PowerShell
 
 # --[Pre-flight: Connect to Graph and Exchange Online]--
@@ -26,6 +26,23 @@ function Connect-ToServices {
     }
     catch {
         Write-Host "[ERROR] Failed to connect to Exchange Online: $_" -ForegroundColor Red
+    }
+}
+
+# --[Retrieve internal domains from tenant]--
+function Get-InternalDomains {
+    Write-Host "Retrieving internal accepted domains..." -ForegroundColor Cyan
+    try {
+        $domains = Get-AcceptedDomain
+        $internalDomains = @()
+        foreach ($domain in $domains) {
+            $internalDomains += $domain.DomainName
+        }
+        $Global:InternalDomains = $internalDomains
+        Write-Host "[SUCCESS] Retrieved internal domains: $($Global:InternalDomains -join ', ')" -ForegroundColor Green
+    }
+    catch {
+        Write-Host "[ERROR] Failed to retrieve internal domains: $_" -ForegroundColor Red
     }
 }
 
@@ -59,9 +76,17 @@ function Detect-MaliciousInboxRules {
                         if ($rule.ForwardAsAttachmentTo) { $recipients += $rule.ForwardAsAttachmentTo }
                         if ($rule.RedirectTo) { $recipients += $rule.RedirectTo }
                         
-                        # Check if any recipient is external
-                        $externalRecipients = $recipients | Where-Object { 
-                            $_ -match "SMTP:" -and $_ -notmatch "onmicrosoft\.com" -and $_ -notmatch "@mezbauddin\.com" -and $_ -notmatch "@arcturustechnology\.co\.uk"
+                        # Determine external recipients based on internal domains list
+                        $externalRecipients = $recipients | Where-Object {
+                            if ($_ -match "SMTP:") {
+                                $email = $_ -replace "^SMTP:" -replace "^smtp:"
+                                $domain = $email.Split("@")[1]
+                                # If the domain is NOT in our retrieved internal domains, flag it as external
+                                return -not ($Global:InternalDomains -contains $domain)
+                            }
+                            else {
+                                return $false
+                            }
                         }
                         
                         if ($externalRecipients) {
@@ -227,6 +252,8 @@ function Show-Menu {
 
 # --[Main Script Execution]--
 Connect-ToServices
+# Retrieve internal domains dynamically from the tenant
+Get-InternalDomains
 Set-InvestigationWindow -Days 7
 
 do {
