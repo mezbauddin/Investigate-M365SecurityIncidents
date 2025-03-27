@@ -1,6 +1,21 @@
 # Investigate-ExchangeSecurityIncidents.ps1
 # Author: Mezba Uddin | MVP | https://mrmicrosoft.com
-# Description: Interactive Exchange Online Security Response Tool using Microsoft Graph API and Exchange Online PowerShell
+# Description:
+#   This interactive script performs security investigations on Exchange Online by:
+#   - Connecting to Microsoft Graph API and Exchange Online.
+#   - Dynamically retrieving the tenant’s accepted internal domains.
+#   - Scanning for malicious inbox rules that forward emails to external domains.
+#   - Checking for unusual outbound email volume.
+#   - Monitoring mailbox permission changes.
+#   - Detecting deletion of critical emails.
+#   - Blocking compromised user accounts.
+#   - Detecting suspicious mailbox export events.
+#
+#   The script uses dynamic retrieval of internal domains to avoid hard-coded values,
+#   ensuring that any changes in tenant domains are automatically accounted for.
+#
+#   Run the script and use the menu to select the desired security investigation action.
+
 
 # --[Pre-flight: Connect to Graph and Exchange Online]--
 function Connect-ToServices {
