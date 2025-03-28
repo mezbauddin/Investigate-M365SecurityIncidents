@@ -1,57 +1,45 @@
 # Detect Malicious Inbox Rules
-
-# Ensure required modules are installed and imported
-if (-not (Get-Module -ListAvailable -Name Microsoft.Graph)) { 
-    Install-Module Microsoft.Graph -Scope CurrentUser -Force 
-}
-Import-Module Microsoft.Graph
-
-if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)) { 
-    Install-Module ExchangeOnlineManagement -Force -AllowClobber 
-}
-Import-Module ExchangeOnlineManagement
-
-# Connect to Microsoft Graph and Exchange Online
-Connect-MgGraph -Scopes "Mail.Read", "MailboxSettings.Read"
+Connect-MgGraph -Scopes "Mail.ReadWrite"
 Connect-ExchangeOnline
 
-# Set investigation window (last 7 days) and internal domains list
-$StartDate = (Get-Date).AddDays(-7).ToString("yyyy-MM-ddTHH:mm:ssZ")
-$EndDate = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ")
-$InternalDomains = @("contoso.com", "company.local")  # Update with your domains
+# Track statistics
+$totalMailboxes = 0
+$totalRulesChecked = 0
+$suspiciousRulesFound = 0
 
-Write-Host " Detecting malicious inbox rules with external forwarding..." -ForegroundColor Yellow
+# Get your organization's domains to identify internal domains
+$domains = Get-AcceptedDomain | Select-Object -ExpandProperty DomainName
+$mailboxes = Get-Mailbox -ResultSize Unlimited | Select-Object -ExpandProperty PrimarySmtpAddress
+Write-Host "Scanning $(($mailboxes | Measure-Object).Count) mailboxes for suspicious forwarding rules..." -ForegroundColor Cyan
 
-# Get all mailboxes and scan inbox rules
-$mailboxes = Get-Mailbox -ResultSize Unlimited
-foreach ($mailbox in $mailboxes) {
-    try {
-        $rules = Get-InboxRule -Mailbox $mailbox.UserPrincipalName
-        foreach ($rule in $rules) {
-            if ($rule.ForwardTo -or $rule.ForwardAsAttachmentTo -or $rule.RedirectTo) {
-                $recipients = @()
-                if ($rule.ForwardTo) { $recipients += $rule.ForwardTo }
-                if ($rule.ForwardAsAttachmentTo) { $recipients += $rule.ForwardAsAttachmentTo }
-                if ($rule.RedirectTo) { $recipients += $rule.RedirectTo }
-
-                # Check if recipient email domain is not in the internal domains list
-                $externalRecipients = $recipients | Where-Object { 
-                    if ($_ -match "SMTP:") { 
-                        $email = $_ -replace "^SMTP:" -replace "^smtp:"
-                        $domain = $email.Split("@")[1]
-                        return -not ($InternalDomains -contains $domain)
-                    } else { return $false }
-                }
-                
-                if ($externalRecipients) {
-                    Write-Host "[WARNING] $($mailbox.UserPrincipalName) - Rule '$($rule.Name)' forwards externally:" -ForegroundColor Red
-                    Write-Host "          Recipients: $($externalRecipients -join ', ')" -ForegroundColor Red
-                }
+foreach ($mbx in $mailboxes) {
+    $totalMailboxes++
+    $rules = Get-InboxRule -Mailbox $mbx
+    $totalRulesChecked += ($rules | Measure-Object).Count
+    
+    $maliciousRules = $rules | Where-Object {
+        ($_.ForwardTo -or $_.ForwardAsAttachmentTo -or $_.RedirectTo) -and
+        @($_.ForwardTo, $_.ForwardAsAttachmentTo, $_.RedirectTo | Where-Object {$_}).Count -gt 0 -and
+        @($_.ForwardTo, $_.ForwardAsAttachmentTo, $_.RedirectTo | Where-Object {$_} | 
+            ForEach-Object {
+                $address = $_ -replace ".*SMTP:|\]|>","" -replace "<",""
+                $domain = $address.Split("@")[1]
+                $domains -notcontains $domain 
             }
-        }
-    } catch {
-        Write-Host "[ERROR] Could not process mailbox $($mailbox.UserPrincipalName): $_" -ForegroundColor DarkYellow
+        ).Count -gt 0
+    }
+    
+    if ($maliciousRules.Count -gt 0) {
+        $suspiciousRulesFound += $maliciousRules.Count
+        Write-Host "ALERT: Suspicious forwarding rules found in $mbx" -ForegroundColor Red
+        $maliciousRules | Format-Table Name, ForwardTo, ForwardAsAttachmentTo, RedirectTo -AutoSize
     }
 }
 
-Write-Host "[INFO] Scan completed." -ForegroundColor Green
+# Show summary
+Write-Host "`nScan Complete: Checked $totalRulesChecked rules across $totalMailboxes mailboxes" -ForegroundColor Cyan
+if ($suspiciousRulesFound -eq 0) {
+    Write-Host "Result: No suspicious forwarding rules detected. Your environment looks clean!" -ForegroundColor Green
+} else {
+    Write-Host "Result: Found $suspiciousRulesFound suspicious forwarding rules that require investigation" -ForegroundColor Red
+}

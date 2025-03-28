@@ -1,21 +1,36 @@
--- Recover Lost Intelligence by Identifying Critical Emails Deletion -- 
+# Recover Lost Intelligence by Identifying Critical Emails Deletion
+# Connect to Microsoft Graph
+Connect-MgGraph -Scopes "Mail.Read"
 
-Ensure required module is installed and imported 
+# Replace with actual email address
+$mailbox = "user@yourdomain.com"
+Write-Host "Checking deleted items for mailbox: $mailbox" -ForegroundColor Cyan
 
-if (-not (Get-Module -ListAvailable -Name Microsoft.Graph)) { Install-Module Microsoft.Graph -Scope CurrentUser -Force } Import-Module Microsoft.Graph 
+# Get count of deleted items
+$countUri = "https://graph.microsoft.com/v1.0/users/$mailbox/mailFolders/deletedItems/messages?`$count=true"
+$countResponse = Invoke-MgGraphRequest -Uri $countUri -Headers @{"ConsistencyLevel"="eventual"}
+Write-Host "Found $($countResponse.'@odata.count') total deleted items" -ForegroundColor Cyan
 
-Connect to Microsoft Graph 
+# Get deleted emails (top 50)
+Write-Host "Retrieving the 50 most recent deleted emails..." -ForegroundColor Cyan
+$baseUri = "https://graph.microsoft.com/v1.0/users/$mailbox/mailFolders/deletedItems/messages?`$top=50&`$select=id,subject,receivedDateTime,sender,importance,hasAttachments&`$orderby=receivedDateTime desc"
+$deletedEmails = (Invoke-MgGraphRequest -Uri $baseUri).value
 
-Connect-MgGraph -Scopes "Mail.Read" 
+# Display results in table format
+if ($deletedEmails.Count -gt 0) {
+    Write-Host "`nDisplaying $($deletedEmails.Count) recently deleted emails:" -ForegroundColor Yellow
+    $deletedEmails | Select-Object @{N="Date";E={[DateTime]::Parse($_.receivedDateTime).ToString("yyyy-MM-dd HH:mm")}},
+                                 @{N="From";E={$_.sender.emailAddress.address}},
+                                 @{N="Subject";E={$_.subject}},
+                                 @{N="Attachments";E={$_.hasAttachments}} | 
+                Format-Table -AutoSize
+    
+    Write-Host "`nRecovery instructions:" -ForegroundColor Green
+    Write-Host "1. User can recover these from Deleted Items folder in Outlook" -ForegroundColor Green
+    Write-Host "2. Select items and use Move > Other Folder to restore them" -ForegroundColor Green
+} else {
+    Write-Host "`nNo deleted emails found for this mailbox." -ForegroundColor Green
+}
 
-Prompt for the mailbox to check 
-
-$mailbox = Read-Host "Enter the email address to check for deleted items (e.g., ceo@company.com)" 
-
-if ([string]::IsNullOrWhiteSpace($mailbox)) { Write-Host "No email address provided. Exiting." -ForegroundColor Red return } 
-
-Write-Host "🔍 Checking deleted items for $mailbox..." -ForegroundColor Yellow 
-
-$Uri = "https://graph.microsoft.com/v1.0/users/$mailbox/mailFolders/deletedItems/messages" $deleted = Invoke-MgGraphRequest -Uri $Uri 
-
-if ($deleted.value.Count -gt 0) { foreach ($msg in $deleted.value) { Write-Host "[WARNING] Deleted: $($msg.subject) | Received: $($msg.receivedDateTime)" -ForegroundColor Red } } else { Write-Host "No deleted emails found in $mailbox." -ForegroundColor Green } 
+Write-Host "`nScan complete. Optional: To filter by keyword, add this to URI:" -ForegroundColor Cyan
+Write-Host "&`$filter=contains(subject,'keyword') or contains(bodyPreview,'keyword')" -ForegroundColor Gray

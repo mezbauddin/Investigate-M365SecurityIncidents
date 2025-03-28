@@ -23,13 +23,13 @@ Mezba Uddin | MVP | https://mezbauddin.com
    - Monitors deleted items in specified mailboxes
    - Helps investigate potential data loss
 
-5. **Compromised User Management**
-   - Ability to quickly block compromised user accounts
-   - Prevents further unauthorized access
-
-6. **Mailbox Export Monitoring**
+5. **Mailbox Export Monitoring**
    - Detects mailbox export operations
    - Helps prevent unauthorized data extraction
+
+6. **Compromised User Management**
+   - Ability to quickly block compromised user accounts
+   - Prevents further unauthorized access
 
 ## Prerequisites
 

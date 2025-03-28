@@ -260,8 +260,8 @@ function Show-Menu {
     Write-Host "2. Find users sending unusual volumes of emails"
     Write-Host "3. Monitor mailbox permission changes"
     Write-Host "4. Check if critical emails were deleted"
-    Write-Host "5. Block compromised user"
-    Write-Host "6. Detect suspicious mailbox exports"
+    Write-Host "5. Detect suspicious mailbox exports"
+    Write-Host "6. Block compromised user"
     Write-Host "7. Exit"
 }
 
@@ -279,11 +279,11 @@ do {
         2 { Detect-UnusualEmailVolume }
         3 { Detect-MailboxPermissionChanges }
         4 { Detect-CriticalEmailDeletion }
-        5 {
+        5 { Detect-MailboxExportEvents }
+        6 {
             $userToBlock = Read-Host "Enter UPN of user to block"
             Block-CompromisedUser -UserPrincipalName $userToBlock
         }
-        6 { Detect-MailboxExportEvents }
         7 { 
             # Disconnect from services
             try {
@@ -298,4 +298,3 @@ do {
         default { Write-Host "[ERROR] Invalid choice. Try again." -ForegroundColor Red }
     }
 } while ($choice -ne 7)
-
