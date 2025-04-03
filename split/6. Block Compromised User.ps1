@@ -1,4 +1,13 @@
 # Block a Compromised User
+
+# Check if Microsoft.Graph module is installed. If not, install it for the current user without prompting
+if (-not (Get-Module -ListAvailable -Name Microsoft.Graph)) {
+    Install-Module Microsoft.Graph -Scope CurrentUser -Force
+}
+
+# Import the Microsoft Graph module
+Import-Module Microsoft.Graph
+
 # Connect to Microsoft Graph
 Connect-MgGraph -Scopes "User.ReadWrite.All", "Directory.ReadWrite.All"
 

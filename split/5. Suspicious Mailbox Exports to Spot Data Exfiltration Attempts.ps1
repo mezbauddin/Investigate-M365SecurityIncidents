@@ -1,5 +1,14 @@
 # Detect Suspicious Mailbox Exports
 
+# Check if Exchange Online Management module is installed. If not, install it for the current user without prompting
+if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)) {
+    Install-Module ExchangeOnlineManagement -Scope CurrentUser -Force
+}
+
+Import-Module ExchangeOnlineManagement
+
+Connect-ExchangeOnline -ShowBanner:$false
+
 Write-Host "Scanning for mailbox export activities in the last 7 days..." -ForegroundColor Cyan
  
 # Set time window and parameters

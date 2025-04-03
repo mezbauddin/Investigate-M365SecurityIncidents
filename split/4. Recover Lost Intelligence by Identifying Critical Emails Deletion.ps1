@@ -1,5 +1,14 @@
 # Recover Lost Intelligence by Identifying Critical Emails Deletion
 
+# Check if Exchange Online Management module is installed. If not, install it for the current user without prompting
+if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)) {
+    Install-Module ExchangeOnlineManagement -Scope CurrentUser -Force
+}
+
+Import-Module ExchangeOnlineManagement
+
+Connect-ExchangeOnline -ShowBanner:$false
+
 # Prompt user for the period (7, 30, 90, 180 days)
 $validPeriods = @("7", "30", "90", "180")
 do {

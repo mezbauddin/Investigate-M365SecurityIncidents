@@ -1,5 +1,16 @@
 # Detect Malicious Inbox Rules
 
+
+# Check if Exchange Online Management module is installed. If not, install it for the current user without prompting
+if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)) {
+    Install-Module ExchangeOnlineManagement -Scope CurrentUser -Force
+}
+
+Import-Module ExchangeOnlineManagement
+
+Connect-ExchangeOnline -ShowBanner:$false
+
+
 $totalRulesChecked = 0; $suspiciousRulesFound = 0
 [array]$domains = Get-AcceptedDomain | Select-Object -ExpandProperty DomainName 
 [array]$mailboxes = Get-ExoMailbox -ResultSize Unlimited | Select-Object -ExpandProperty PrimarySmtpAddress 

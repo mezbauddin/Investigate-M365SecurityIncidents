@@ -1,5 +1,11 @@
 # Identify Anomalous Outbound Email Volumes
 
+# Check if Microsoft.Graph module is installed. If not, install it for the current user.
+if (-not (Get-Module -ListAvailable -Name Microsoft.Graph)) {
+    Install-Module Microsoft.Graph -Scope CurrentUser -Force
+}
+Import-Module Microsoft.Graph
+
 #Prompt user for the period (7, 30, 90, 180 days)
 $validPeriods = @("7", "30", "90", "180")
 do {

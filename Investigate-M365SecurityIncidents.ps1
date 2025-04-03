@@ -16,7 +16,6 @@
 #
 #   Run the script and use the menu to select the desired security investigation action.
 
-
 # --[Pre-flight: Connect to Graph and Exchange Online]--
 function Connect-ToServices {
     Write-Host "Connecting to Microsoft Graph API..." -ForegroundColor Cyan
@@ -66,7 +65,7 @@ function Set-InvestigationWindow {
     param ([int]$Days = 7)
     $Global:StartDate = (Get-Date).AddDays(-$Days).ToString("yyyy-MM-ddTHH:mm:ssZ")
     $Global:EndDate = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ")
-    Write-Host "[INFO] Investigating incidents from $StartDate to $EndDate..."
+    Write-Host "[INFO] Investigating incidents from $Global:StartDate to $Global:EndDate..."
 }
 
 # --[1. Detect malicious inbox rules forwarding externally]--
@@ -169,7 +168,7 @@ function Detect-MailboxPermissionChanges {
     Write-Host "`n[SCANNING] Checking for mailbox permission changes..." -ForegroundColor Yellow
     
     try {
-        $Uri = "https://graph.microsoft.com/v1.0/auditLogs/directoryAudits?`$filter=activityDisplayName eq 'Update mailbox permissions' and activityDateTime ge $StartDate and activityDateTime le $EndDate"
+        $Uri = "https://graph.microsoft.com/v1.0/auditLogs/directoryAudits?`$filter=activityDisplayName eq 'Update mailbox permissions' and activityDateTime ge $Global:StartDate and activityDateTime le $Global:EndDate"
         $results = Invoke-MgGraphRequest -Uri $Uri
         
         if ($results.value.Count -gt 0) {
@@ -238,16 +237,19 @@ function Detect-MailboxExportEvents {
     Write-Host "`n[SCANNING] Checking for suspicious mailbox exports..." -ForegroundColor Yellow
     
     try {
-        $Uri = "https://graph.microsoft.com/v1.0/auditLogs/directoryAudits?`$filter=activityDisplayName eq 'Export mailbox' and activityDateTime ge $StartDate and activityDateTime le $EndDate"
+        $Uri = "https://graph.microsoft.com/v1.0/auditLogs/directoryAudits?`$filter=activityDisplayName eq 'Export mailbox' and activityDateTime ge $Global:StartDate and activityDateTime le $Global:EndDate"
         $results = Invoke-MgGraphRequest -Uri $Uri
         
         if ($results.value.Count -gt 0) {
             foreach ($log in $results.value) {
                 Write-Host "[WARNING] Export: $($log.initiatedBy.user.userPrincipalName) exported mailbox at $($log.activityDateTime)" -ForegroundColor Red
             }
+            Write-Host "`nRecommended security actions:`n1. Verify that each export operation was authorized and legitimate.`n2. For suspicious exports, determine what data was exported and by whom.`n3. Review or implement approval processes for mailbox exports." -ForegroundColor Yellow
         } else {
             Write-Host "[INFO] No mailbox export events detected in the specified time period." -ForegroundColor Green
         }
+        
+        # Note: If a high volume of events is expected, consider implementing pagination.
     } catch {
         Write-Host "[ERROR] Error checking mailbox export events: $_" -ForegroundColor Red
     }
@@ -280,7 +282,7 @@ do {
         3 { Detect-MailboxPermissionChanges }
         4 { Detect-CriticalEmailDeletion }
         5 { Detect-MailboxExportEvents }
-        6 {
+        6 { 
             $userToBlock = Read-Host "Enter UPN of user to block"
             Block-CompromisedUser -UserPrincipalName $userToBlock
         }
