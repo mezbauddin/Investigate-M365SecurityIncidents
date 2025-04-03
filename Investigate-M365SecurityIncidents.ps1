@@ -30,7 +30,9 @@ function Connect-ToServices {
             Install-Module -Name ExchangeOnlineManagement -Force -AllowClobber
         }
         Import-Module ExchangeOnlineManagement
-        Connect-ExchangeOnline
+        
+        # Connect to Exchange Online with recommended parameters
+        Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
         Write-Host "[SUCCESS] Connected to Exchange Online!" -ForegroundColor Green
     }
     catch {
@@ -198,10 +200,8 @@ function Block-CompromisedUser {
 # --[6. Detect large mailbox exports]--
 function Detect-MailboxExportEvents {
     Write-Host "`n[SCANNING] Checking for suspicious mailbox exports..." -ForegroundColor Yellow
-
-    # Prompt for an optional filter UPN (leave blank to see all export events)
+    # Optional UPN filter prompt (leave blank for all)
     $filterUPN = Read-Host "Enter UPN to filter export events (leave blank for all)"
-    
     try {
         $searchParams = @{
             StartDate      = $Global:StartDate
@@ -281,7 +281,21 @@ function Show-Menu {
 # --[Main Script Execution]--
 Connect-ToServices
 Get-InternalDomains
-Set-InvestigationWindow -Days 7
+
+# Prompt for investigation window in days (default 7)
+$validPeriods = @("7", "30", "90")
+$daysInput = Read-Host "Enter the reporting period in days (7, 30, 90):"
+if ([string]::IsNullOrWhiteSpace($daysInput)) {
+    $daysInput = 7
+} else {
+    if ($validPeriods -notcontains $daysInput) {
+        Write-Host "[WARNING] Invalid period. Using default 7 days." -ForegroundColor Yellow
+        $daysInput = 7
+    } else {
+        $daysInput = [int]$daysInput
+    }
+}
+Set-InvestigationWindow -Days $daysInput
 
 do {
     Show-Menu
