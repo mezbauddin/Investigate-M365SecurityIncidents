@@ -1,36 +1,35 @@
 # Recover Lost Intelligence by Identifying Critical Emails Deletion
-# Connect to Microsoft Graph
-Connect-MgGraph -Scopes "Mail.Read"
 
-# Replace with actual email address
-$mailbox = "user@yourdomain.com"
-Write-Host "Checking deleted items for mailbox: $mailbox" -ForegroundColor Cyan
-
-# Get count of deleted items
-$countUri = "https://graph.microsoft.com/v1.0/users/$mailbox/mailFolders/deletedItems/messages?`$count=true"
-$countResponse = Invoke-MgGraphRequest -Uri $countUri -Headers @{"ConsistencyLevel"="eventual"}
-Write-Host "Found $($countResponse.'@odata.count') total deleted items" -ForegroundColor Cyan
-
-# Get deleted emails (top 50)
-Write-Host "Retrieving the 50 most recent deleted emails..." -ForegroundColor Cyan
-$baseUri = "https://graph.microsoft.com/v1.0/users/$mailbox/mailFolders/deletedItems/messages?`$top=50&`$select=id,subject,receivedDateTime,sender,importance,hasAttachments&`$orderby=receivedDateTime desc"
-$deletedEmails = (Invoke-MgGraphRequest -Uri $baseUri).value
-
-# Display results in table format
-if ($deletedEmails.Count -gt 0) {
-    Write-Host "`nDisplaying $($deletedEmails.Count) recently deleted emails:" -ForegroundColor Yellow
-    $deletedEmails | Select-Object @{N="Date";E={[DateTime]::Parse($_.receivedDateTime).ToString("yyyy-MM-dd HH:mm")}},
-                                 @{N="From";E={$_.sender.emailAddress.address}},
-                                 @{N="Subject";E={$_.subject}},
-                                 @{N="Attachments";E={$_.hasAttachments}} | 
-                Format-Table -AutoSize
-    
-    Write-Host "`nRecovery instructions:" -ForegroundColor Green
-    Write-Host "1. User can recover these from Deleted Items folder in Outlook" -ForegroundColor Green
-    Write-Host "2. Select items and use Move > Other Folder to restore them" -ForegroundColor Green
-} else {
-    Write-Host "`nNo deleted emails found for this mailbox." -ForegroundColor Green
+# Prompt user for the period (7, 30, 90, 180 days)
+$validPeriods = @("7", "30", "90", "180")
+do {
+    $selectedPeriod = Read-Host "Enter the reporting period in days (7, 30, 90, 180)"
+} while ($selectedPeriod -notin $validPeriods)
+# Convert period to integer
+$selectedPeriod = [int]$selectedPeriod
+# Set time range
+$startDate = (Get-Date).AddDays(-$selectedPeriod)
+$endDate = Get-Date
+# Fetch MailItemsAccessed events
+$logEntries = Search-UnifiedAuditLog -StartDate $startDate -EndDate $endDate -Operations MailItemsAccessed -ResultSize 5000
+# Process data and extract relevant details
+$report = $logEntries | ForEach-Object {
+    $record = $_.AuditData | ConvertFrom-Json
+    [PSCustomObject]@{
+        MailboxOwner = $record.MailboxOwnerUPN
+        AccessedBy = $record.UserId
+        AccessTime = $record.CreationTime
+        ClientApp = $record.ClientAppId
+        AccessLocation = $record.ClientIPAddress
+        AccessCount = 1
+        RiskLevel = if ($record.ClientIPAddress -match '185\.220|194\.88') { 'High' } elseif ($record.ClientIPAddress -match '102\.54') { 'Medium' } else { 'Low' }
+    }
+} | Group-Object -Property MailboxOwner, AccessedBy, ClientApp, AccessLocation | ForEach-Object {
+    $entry = $_.Group[0]
+    $entry.AccessCount = $_.Count
+    $entry
 }
+# Export results to CSV
+$report | Export-Csv -Path "SuspiciousMailAccessReport.csv" -NoTypeInformation
 
-Write-Host "`nScan complete. Optional: To filter by keyword, add this to URI:" -ForegroundColor Cyan
-Write-Host "&`$filter=contains(subject,'keyword') or contains(bodyPreview,'keyword')" -ForegroundColor Gray
+Write-Host "Report generated: SuspiciousMailAccessReport.csv" -ForegroundColor Green

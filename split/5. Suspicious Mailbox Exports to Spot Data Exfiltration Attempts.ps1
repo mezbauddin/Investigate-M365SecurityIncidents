@@ -1,48 +1,74 @@
 # Detect Suspicious Mailbox Exports
-# Connect to Microsoft Graph
-Connect-MgGraph -Scopes "AuditLog.Read.All"
 
 Write-Host "Scanning for mailbox export activities in the last 7 days..." -ForegroundColor Cyan
-
-# Set time period variables (7 days)
-$StartDate = (Get-Date).AddDays(-7).ToString("yyyy-MM-ddTHH:mm:ssZ")
-$EndDate = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ")
-
-# Check for mailbox exports (run for each activity type)
-$exportActivities = @("Export mailbox", "Export mailbox content", "New-MailboxExportRequest", 
-                    "Start-MailboxExportRequest", "Export eDiscovery search results")
-Write-Host "Monitoring for these activities: $($exportActivities -join ', ')" -ForegroundColor Cyan
-
-# Get all export activities in one variable
+ 
+# Set time window and parameters
+$StartDate = (Get-Date).AddDays(-7).ToUniversalTime()
+$EndDate = (Get-Date).ToUniversalTime()
+$exportActivities = @("New-MailboxExportRequest", "New-ComplianceSearchAction")
+$SessionId = [guid]::NewGuid().ToString()
+$ResultSize = 5000
 $allExports = @()
-foreach ($activity in $exportActivities) {
-    Write-Host "Checking for: $activity..." -ForegroundColor Gray
-    $encodedActivity = [System.Web.HttpUtility]::UrlEncode("'$activity'")
-    $Uri = "https://graph.microsoft.com/v1.0/auditLogs/directoryAudits?`$filter=activityDisplayName eq $encodedActivity and activityDateTime ge $StartDate and activityDateTime le $EndDate"
-    $results = Invoke-MgGraphRequest -Uri $Uri
-    if ($results.value.Count -gt 0) {
-        Write-Host "  Found $($results.value.Count) instances" -ForegroundColor Yellow
-        $allExports += $results.value
+ 
+try {
+    Write-Host "Retrieving audit logs..." -ForegroundColor Yellow
+    # Initial search parameters
+    $searchParams = @{
+        StartDate      = $StartDate
+        EndDate        = $EndDate
+        Operations     = $exportActivities
+        ResultSize     = $ResultSize
+        SessionId      = $SessionId
+        SessionCommand = "ReturnLargeSet"
     }
+    # First batch with ReturnLargeSet
+    $batch = Search-UnifiedAuditLog @searchParams
+    # Process results with pagination
+    do {
+        if ($batch -and $batch.Count -gt 0) {
+            Write-Host "Processing batch of $($batch.Count) records..." -ForegroundColor Yellow
+            # Filter for export operations and add to collection
+            foreach ($record in $batch) {
+                if ($record.AuditData) {
+                    try {
+                        $auditData = $record.AuditData | ConvertFrom-Json
+                        if ($record.Operation -eq "New-MailboxExportRequest" -or 
+                            ($record.Operation -eq "New-ComplianceSearchAction" -and 
+                            $auditData.Parameters -match 'Export' -and 
+                            $auditData.Parameters -match 'Format')) {
+                            $record | Add-Member -MemberType NoteProperty -Name "ParsedAuditData" -Value $auditData -Force -PassThru
+                            $allExports += $record
+                        }
+                    } catch {
+                        Write-Host "Warning: Could not parse AuditData for record ID: $($record.Id)" -ForegroundColor Yellow
+                    }
+                }
+            }
+            # Get next page if we have a full batch
+            if ($batch.Count -eq $ResultSize) {
+                $searchParams['SessionCommand'] = "ReturnNextPage"
+                $batch = Search-UnifiedAuditLog @searchParams
+            } else {
+                $batch = $null
+            }
+        }
+    } while ($batch -and $batch.Count -gt 0)
+    # Display results
+    if ($allExports.Count -gt 0) {
+        Write-Host "`nDETECTED $($allExports.Count) EXPORT OPERATIONS:" -ForegroundColor Red
+        $allExports | Select-Object @{N="Date";E={ $_.CreationDate.ToString("yyyy-MM-dd HH:mm") }},
+                               @{N="Actor";E={ if ($_.UserIds) { $_.UserIds[0] } else { "System" } }},
+                               @{N="Action";E={ $_.Operation }},
+                               @{N="Target";E={ $_.ObjectId }} |
+                               Sort-Object Date -Descending |
+                               Format-Table -AutoSize
+        Write-Host "` nRecommended security actions:`n1. Verify that each export operation was authorized and legitimate.`n2. For suspicious exports, determine what data was exported and by whom.`n3. Review or implement approval processes for mailbox exports." -ForegroundColor Yellow
+    } else {
+        Write-Host "`nNo mailbox export activities detected in the specified time period." -ForegroundColor Green
+    }
+} catch [System.Management.Automation.CommandNotFoundException] {
+    Write-Host "Error: Search-UnifiedAuditLog cmdlet not found. Connect to Exchange Online first." -ForegroundColor Red
+} catch {
+    Write-Host "Error: $_" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
 }
-
-# Display results in a simple table
-if ($allExports.Count -gt 0) {
-    Write-Host "`nDETECTED $($allExports.Count) EXPORT OPERATIONS:" -ForegroundColor Red
-    $allExports | Sort-Object activityDateTime -Descending | 
-        Select-Object @{N="Date";E={($_.activityDateTime -as [DateTime]).ToString("yyyy-MM-dd HH:mm")}},
-                     @{N="User";E={$_.initiatedBy.user.userPrincipalName}},
-                     activityDisplayName,
-                     @{N="Target";E={$_.targetResources.displayName -join ", "}} |
-        Format-Table -AutoSize
-    
-    Write-Host "`nRecommended security actions:" -ForegroundColor Yellow
-    Write-Host "1. Verify these exports were authorized" -ForegroundColor Cyan
-    Write-Host "2. Check what data was exported" -ForegroundColor Cyan
-    Write-Host "3. Consider implementing mailbox export approval process" -ForegroundColor Cyan
-} else {
-    Write-Host "`nNo mailbox export activities detected in the specified time period." -ForegroundColor Green
-}
-
-Write-Host "`nIf you also have Exchange Online PowerShell connected, you can check:" -ForegroundColor Cyan
-Write-Host "Get-MailboxExportRequest | Get-MailboxExportRequestStatistics | Format-Table Identity,Status,FilePath,PercentComplete" -ForegroundColor Gray
