@@ -11,9 +11,9 @@ Connect-ExchangeOnline -ShowBanner:$false
 
 # Prompt user for a date range
 Write-Host "`n=== Detect Suspicious Mailbox Exports ===" -ForegroundColor Cyan
-$validPeriods = @("7","30","90","180")
+$validPeriods = @("7","30","90")
 do {
-    $selectedPeriod = Read-Host "Enter the reporting period in days (7, 30, 90, 180)"
+    $selectedPeriod = Read-Host "Enter the reporting period in days (7, 30, 90)"
 } while ($selectedPeriod -notin $validPeriods)
 $selectedPeriod = [int]$selectedPeriod
 

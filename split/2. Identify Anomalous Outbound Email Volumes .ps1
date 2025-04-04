@@ -6,10 +6,10 @@ if (-not (Get-Module -ListAvailable -Name Microsoft.Graph)) {
 }
 Import-Module Microsoft.Graph
 
-#Prompt user for the period (7, 30, 90, 180 days)
-$validPeriods = @("7", "30", "90", "180")
+#Prompt user for the period (7, 30, 90 days - max 90 days)
+$validPeriods = @("7", "30", "90")
 do {
-    $selectedPeriod = Read-Host "Enter the reporting period in days (7, 30, 90, 180)"
+    $selectedPeriod = Read-Host "Enter the reporting period in days (7, 30, 90)"
 } while ($selectedPeriod -notin $validPeriods)
 
 #Construct the API URL based on the selected period
