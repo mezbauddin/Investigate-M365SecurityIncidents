@@ -83,7 +83,7 @@ function Set-InvestigationWindow {
 }
 
 # --[1. Detect malicious inbox rules forwarding externally]--
-function Detect-MaliciousInboxRules {
+function Get-MaliciousInboxRules {
     Write-Host "`n[SCANNING] Detecting inbox rules with external forwarding..." -ForegroundColor Yellow
     $foundMaliciousRules = $false
     try {
@@ -129,7 +129,7 @@ function Detect-MaliciousInboxRules {
 }
 
 # --[2. Detect users sending large volumes of mail]--
-function Detect-UnusualEmailVolume {
+function Get-UnusualEmailVolume {
     Write-Host "`n[SCANNING] Checking for unusual outbound email volume..." -ForegroundColor Yellow
     try {
         $Uri = "https://graph.microsoft.com/v1.0/reports/getEmailActivityUserDetail(period='D7')"
@@ -160,7 +160,7 @@ function Detect-UnusualEmailVolume {
 }
 
 # --[3. Monitor mailbox permission changes]--
-function Detect-MailboxPermissionChanges {
+function Get-MailboxPermissionChanges {
     Write-Host "`n[SCANNING] Checking for mailbox permission changes..." -ForegroundColor Yellow
     try {
         $Uri = "https://graph.microsoft.com/v1.0/auditLogs/directoryAudits?`$filter=activityDisplayName eq 'Update mailbox permissions' and activityDateTime ge $Global:StartDate and activityDateTime le $Global:EndDate"
@@ -179,28 +179,58 @@ function Detect-MailboxPermissionChanges {
     }
 }
 
-# --[4. Detect deleted critical emails]--
-function Detect-CriticalEmailDeletion {
-    Write-Host "`n[SCANNING] Detecting critical email deletions..." -ForegroundColor Yellow
-    $mailbox = Read-Host "Enter the email address to check for deleted items (e.g., ceo@company.com)"
-    if ([string]::IsNullOrWhiteSpace($mailbox)) {
-        Write-Host "[ERROR] No email address provided. Skipping check." -ForegroundColor Red
-        return
-    }
+# --[Feature 4: Check for Deleted Critical Emails]--
+function Get-DeletedCriticalEmails {
+    Write-Host "`n=== CHECKING FOR DELETED CRITICAL EMAILS ===" -ForegroundColor Cyan
+    
+    # Set time range
+    $startDate = (Get-Date).AddDays(-$daysInput)
+    $endDate = Get-Date
+    
+    # Fetch MailItemsAccessed events
+    Write-Host "Retrieving mail access audit logs for the past $daysInput days..." -ForegroundColor Cyan
     try {
-        $Uri = "https://graph.microsoft.com/v1.0/users/$mailbox/mailFolders/deletedItems/messages"
-        $deleted = Invoke-MgGraphRequest -Uri $Uri -ErrorAction Stop
-        if ($deleted.value.Count -gt 0) {
-            foreach ($msg in $deleted.value) {
-                Write-Host "[WARNING] Deleted: $($msg.subject) | $($msg.receivedDateTime)" -ForegroundColor Red
-            }
-        }
-        else {
-            Write-Host "[INFO] No deleted emails found in the specified mailbox." -ForegroundColor Green
-        }
+        $logEntries = Search-UnifiedAuditLog -StartDate $startDate -EndDate $endDate -Operations MailItemsAccessed -ResultSize 5000 -ErrorAction Stop
+        Write-Host "Processing $($logEntries.Count) log entries..." -ForegroundColor Yellow
     }
     catch {
-        Write-Host "[ERROR] Error checking deleted emails: $_" -ForegroundColor Red
+        Write-Host "[ERROR] Error retrieving deleted critical mailbox emails: $_" -ForegroundColor Red
+    }
+    
+    # Process data and extract relevant details
+    if ($logEntries) {
+        $report = $logEntries | ForEach-Object {
+            $record = $_.AuditData | ConvertFrom-Json
+            [PSCustomObject]@{
+                MailboxOwner   = $record.MailboxOwnerUPN
+                AccessedBy     = $record.UserId
+                AccessTime     = $record.CreationTime
+                ClientApp      = $record.ClientAppId
+                AccessLocation = $record.ClientIPAddress
+                AccessCount    = 1
+                RiskLevel      = if ($record.ClientIPAddress -match '185\.220|194\.88') { 'High' } elseif ($record.ClientIPAddress -match '102\.54') { 'Medium' } else { 'Low' }
+            }
+        } | Group-Object -Property MailboxOwner, AccessedBy, ClientApp, AccessLocation | ForEach-Object {
+            $entry = $_.Group[0]
+            $entry.AccessCount = $_.Count
+            $entry
+        }
+    }
+    else {
+        Write-Host "[WARNING] No deleted critical emails found: $_" -ForegroundColor Yellow
+    }
+    
+    # Export results to CSV
+    try {
+        $reportPath = ".\SuspiciousMailAccessReport.csv"
+        $report | Export-Csv -Path $reportPath -NoTypeInformation -ErrorAction Stop
+    
+        Write-Host "Results: Found $($report.Count) mail access events" -ForegroundColor Yellow
+        $report | Format-Table -AutoSize
+        Write-Host "Report exported to: $reportPath" -ForegroundColor Green
+    }
+    catch {
+        Write-Host "[ERROR] Error exporting deleting critical emails" -ForegroundColor Red
     }
 }
 
@@ -224,7 +254,7 @@ function Block-CompromisedUser {
 }
 
 # --[6. Detect large mailbox exports]--
-function Detect-MailboxExportEvents {
+function Get-MailboxExportEvents {
     Write-Host "`n[SCANNING] Checking for suspicious mailbox exports..." -ForegroundColor Yellow
     # Optional UPN filter prompt (leave blank for all)
     $filterUPN = Read-Host "Enter UPN to filter export events (leave blank for all)"
@@ -335,11 +365,11 @@ do {
     Show-Menu
     $choice = Read-Host "Select an option (1-7)"
     switch ($choice) {
-        1 { Detect-MaliciousInboxRules }
-        2 { Detect-UnusualEmailVolume }
-        3 { Detect-MailboxPermissionChanges }
-        4 { Detect-CriticalEmailDeletion }
-        5 { Detect-MailboxExportEvents }
+        1 { Get-MaliciousInboxRules }
+        2 { Get-UnusualEmailVolume }
+        3 { Get-MailboxPermissionChanges }
+        4 { Get-DeletedCriticalEmails }
+        5 { Get-MailboxExportEvents }
         6 { 
             $userToBlock = Read-Host "Enter UPN of user to block"
             Block-CompromisedUser -UserPrincipalName $userToBlock
