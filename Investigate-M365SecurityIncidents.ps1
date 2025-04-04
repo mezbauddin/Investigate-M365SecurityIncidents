@@ -20,32 +20,42 @@
 function Connect-ToServices {
     Write-Host "Connecting to Microsoft Graph API..." -ForegroundColor Cyan
     try {
+        Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
+    }
+    catch {
+        Write-Host "[WARNING] Microsoft Graph Authentication module not found. Installing..." -ForegroundColor Yellow
+        Install-Module -Name Microsoft.Graph.Authentication -Force -AllowClobber
+        Import-Module Microsoft.Graph.Authentication
+    }
+    try {
         Connect-MgGraph -Scopes "AuditLog.Read.All", "Mail.Read", "MailboxSettings.Read", "User.ReadWrite.All", "Mail.ReadBasic" -NoWelcome -ErrorAction Stop
         Write-Host "[SUCCESS] Connected to Microsoft Graph!" -ForegroundColor Green
     }
     catch {
         Write-Host "[ERROR] Failed to connect to Microsoft Graph: $_" -ForegroundColor Red
-    }
-    
-    # Connect to Exchange Online
-    Write-Host "Connecting to Exchange Online..." -ForegroundColor Cyan
-    try {
-        Import-Module ExchangeOnlineManagement -ErrorAction Stop
-    }
-    catch {
-        Write-Host "[WARNING] Exchange Online Management module not found. Installing..." -ForegroundColor Yellow
-        Install-Module -Name ExchangeOnlineManagement -Force -AllowClobber
-        Import-Module ExchangeOnlineManagement
-    }
-    try {
-        # Connect to Exchange Online with recommended parameters
-        Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
-        Write-Host "[SUCCESS] Connected to Exchange Online!" -ForegroundColor Green
-    }
-    catch {
-        Write-Host "[ERROR] Failed to connect to Exchange Online: $_" -ForegroundColor Red
+        
     }
 }
+    
+# Connect to Exchange Online
+Write-Host "Connecting to Exchange Online..." -ForegroundColor Cyan
+try {
+    Import-Module ExchangeOnlineManagement -ErrorAction Stop
+}
+catch {
+    Write-Host "[WARNING] Exchange Online Management module not found. Installing..." -ForegroundColor Yellow
+    Install-Module -Name ExchangeOnlineManagement -Force -AllowClobber
+    Import-Module ExchangeOnlineManagement
+}
+try {
+    # Connect to Exchange Online with recommended parameters
+    Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+    Write-Host "[SUCCESS] Connected to Exchange Online!" -ForegroundColor Green
+}
+catch {
+    Write-Host "[ERROR] Failed to connect to Exchange Online: $_" -ForegroundColor Red
+}
+
 
 # --[Retrieve internal domains from tenant]--
 function Get-InternalDomains {
