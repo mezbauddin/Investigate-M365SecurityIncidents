@@ -19,18 +19,25 @@
 # --[Pre-flight: Connect to Graph and Exchange Online]--
 function Connect-ToServices {
     Write-Host "Connecting to Microsoft Graph API..." -ForegroundColor Cyan
-    Connect-MgGraph -Scopes "AuditLog.Read.All", "Mail.Read", "MailboxSettings.Read", "User.ReadWrite.All", "Mail.ReadBasic"
-    Write-Host "[SUCCESS] Connected to Microsoft Graph!" -ForegroundColor Green
+    try {
+        Connect-MgGraph -Scopes "AuditLog.Read.All", "Mail.Read", "MailboxSettings.Read", "User.ReadWrite.All", "Mail.ReadBasic" -NoWelcome -ErrorAction Stop
+        Write-Host "[SUCCESS] Connected to Microsoft Graph!" -ForegroundColor Green
+    }
+    catch {
+        Write-Host "[ERROR] Failed to connect to Microsoft Graph: $_" -ForegroundColor Red
+    }
     
     # Connect to Exchange Online
     Write-Host "Connecting to Exchange Online..." -ForegroundColor Cyan
     try {
-        if (!(Get-Module -ListAvailable -Name ExchangeOnlineManagement)) {
-            Write-Host "[WARNING] Exchange Online Management module not found. Installing..." -ForegroundColor Yellow
-            Install-Module -Name ExchangeOnlineManagement -Force -AllowClobber
-        }
+        Import-Module ExchangeOnlineManagement -ErrorAction Stop
+    }
+    catch {
+        Write-Host "[WARNING] Exchange Online Management module not found. Installing..." -ForegroundColor Yellow
+        Install-Module -Name ExchangeOnlineManagement -Force -AllowClobber
         Import-Module ExchangeOnlineManagement
-        
+    }
+    try {
         # Connect to Exchange Online with recommended parameters
         Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
         Write-Host "[SUCCESS] Connected to Exchange Online!" -ForegroundColor Green
@@ -44,7 +51,7 @@ function Connect-ToServices {
 function Get-InternalDomains {
     Write-Host "Retrieving internal accepted domains..." -ForegroundColor Cyan
     try {
-        $domains = Get-AcceptedDomain
+        $domains = Get-AcceptedDomain -ErrorAction Stop
         $internalDomains = @()
         foreach ($domain in $domains) {
             $internalDomains += $domain.DomainName
@@ -70,10 +77,10 @@ function Detect-MaliciousInboxRules {
     Write-Host "`n[SCANNING] Detecting inbox rules with external forwarding..." -ForegroundColor Yellow
     $foundMaliciousRules = $false
     try {
-        $mailboxes = Get-Mailbox -ResultSize Unlimited
+        $mailboxes = Get-Mailbox -ResultSize Unlimited -ErrorAction Stop
         foreach ($mailbox in $mailboxes) {
             try {
-                $rules = Get-InboxRule -Mailbox $mailbox.UserPrincipalName
+                $rules = Get-InboxRule -Mailbox $mailbox.UserPrincipalName -ErrorAction Stop
                 foreach ($rule in $rules) {
                     if ($rule.ForwardTo -or $rule.ForwardAsAttachmentTo -or $rule.RedirectTo) {
                         $recipients = @()
@@ -85,7 +92,8 @@ function Detect-MaliciousInboxRules {
                                 $email = $_ -replace "^SMTP:" -replace "^smtp:"
                                 $domain = $email.Split("@")[1]
                                 return -not ($Global:InternalDomains -contains $domain)
-                            } else { return $false }
+                            }
+                            else { return $false }
                         }
                         if ($externalRecipients) {
                             Write-Host "[WARNING] [$($mailbox.UserPrincipalName)] - Malicious rule: $($rule.Name)" -ForegroundColor Red
@@ -116,7 +124,7 @@ function Detect-UnusualEmailVolume {
     try {
         $Uri = "https://graph.microsoft.com/v1.0/reports/getEmailActivityUserDetail(period='D7')"
         $outputPath = "$env:TEMP\email_activity_$(Get-Date -Format 'yyyyMMddHHmmss').csv"
-        Invoke-MgGraphRequest -Method GET -Uri $Uri -OutputFilePath $outputPath
+        Invoke-MgGraphRequest -Method GET -Uri $Uri -OutputFilePath $outputPath -ErrorAction Stop
         if (Test-Path $outputPath) {
             $parsed = Import-Csv $outputPath
             $highVolumeSenders = $parsed | Where-Object { 
@@ -126,14 +134,17 @@ function Detect-UnusualEmailVolume {
                 foreach ($sender in $highVolumeSenders) {
                     Write-Host "[WARNING] $($sender.UserPrincipalName) sent $($sender.SendCount) emails in last 7 days." -ForegroundColor Red
                 }
-            } else {
+            }
+            else {
                 Write-Host "[INFO] No users with unusual email volume detected." -ForegroundColor Green
             }
             Remove-Item $outputPath -Force -ErrorAction SilentlyContinue
-        } else {
+        }
+        else {
             Write-Host "[ERROR] Failed to retrieve email activity report." -ForegroundColor Red
         }
-    } catch {
+    }
+    catch {
         Write-Host "[ERROR] Error retrieving email volume data: $_" -ForegroundColor Red
     }
 }
@@ -143,15 +154,17 @@ function Detect-MailboxPermissionChanges {
     Write-Host "`n[SCANNING] Checking for mailbox permission changes..." -ForegroundColor Yellow
     try {
         $Uri = "https://graph.microsoft.com/v1.0/auditLogs/directoryAudits?`$filter=activityDisplayName eq 'Update mailbox permissions' and activityDateTime ge $Global:StartDate and activityDateTime le $Global:EndDate"
-        $results = Invoke-MgGraphRequest -Uri $Uri
+        $results = Invoke-MgGraphRequest -Uri $Uri -ErrorAction Stop
         if ($results.value.Count -gt 0) {
             foreach ($record in $results.value) {
                 Write-Host "[WARNING] $($record.activityDateTime) - $($record.initiatedBy.user.userPrincipalName) updated mailbox permissions." -ForegroundColor Red
             }
-        } else {
+        }
+        else {
             Write-Host "[INFO] No mailbox permission changes detected in the specified time period." -ForegroundColor Green
         }
-    } catch {
+    }
+    catch {
         Write-Host "[ERROR] Error checking mailbox permission changes: $_" -ForegroundColor Red
     }
 }
@@ -166,15 +179,17 @@ function Detect-CriticalEmailDeletion {
     }
     try {
         $Uri = "https://graph.microsoft.com/v1.0/users/$mailbox/mailFolders/deletedItems/messages"
-        $deleted = Invoke-MgGraphRequest -Uri $Uri
+        $deleted = Invoke-MgGraphRequest -Uri $Uri -ErrorAction Stop
         if ($deleted.value.Count -gt 0) {
             foreach ($msg in $deleted.value) {
                 Write-Host "[WARNING] Deleted: $($msg.subject) | $($msg.receivedDateTime)" -ForegroundColor Red
             }
-        } else {
+        }
+        else {
             Write-Host "[INFO] No deleted emails found in the specified mailbox." -ForegroundColor Green
         }
-    } catch {
+    }
+    catch {
         Write-Host "[ERROR] Error checking deleted emails: $_" -ForegroundColor Red
     }
 }
@@ -190,9 +205,10 @@ function Block-CompromisedUser {
     }
     Write-Host "`n[SECURITY] Blocking user: $UserPrincipalName" -ForegroundColor Yellow
     try {
-        Update-MgUser -UserId $UserPrincipalName -AccountEnabled:$false
+        Update-MgUser -UserId $UserPrincipalName -AccountEnabled:$false -ErrorAction Stop
         Write-Host "[SUCCESS] User blocked successfully." -ForegroundColor Green
-    } catch {
+    }
+    catch {
         Write-Host "[ERROR] Failed to block user: $_" -ForegroundColor Red
     }
 }
@@ -210,6 +226,7 @@ function Detect-MailboxExportEvents {
             ResultSize     = 5000
             SessionId      = [guid]::NewGuid().ToString()
             SessionCommand = "ReturnLargeSet"
+            ErrorAction    = "Stop"
         }
         $allExports = @()
         $batch = Search-UnifiedAuditLog @searchParams
@@ -219,22 +236,24 @@ function Detect-MailboxExportEvents {
                 foreach ($record in $batch) {
                     if ($record.AuditData) {
                         try {
-                            $auditData = $record.AuditData | ConvertFrom-Json
+                            $auditData = $record.AuditData | ConvertFrom-Json -ErrorAction Stop
                             if ($record.Operation -eq "New-MailboxExportRequest" -or 
                                 ($record.Operation -eq "New-ComplianceSearchAction" -and 
-                                 $auditData.Parameters -match 'Export' -and 
-                                 $auditData.Parameters -match 'Format')) {
+                                $auditData.Parameters -match 'Export' -and 
+                                $auditData.Parameters -match 'Format')) {
                                 if (-not [string]::IsNullOrWhiteSpace($filterUPN)) {
                                     if ($record.initiatedBy.user.userPrincipalName -eq $filterUPN) {
-                                        $record | Add-Member -MemberType NoteProperty -Name "ParsedAuditData" -Value $auditData -Force -PassThru
+                                        $record | Add-Member -MemberType NoteProperty -Name "ParsedAuditData" -Value $auditData -Force -PassThru -ErrorAction Stop
                                         $allExports += $record
                                     }
-                                } else {
-                                    $record | Add-Member -MemberType NoteProperty -Name "ParsedAuditData" -Value $auditData -Force -PassThru
+                                }
+                                else {
+                                    $record | Add-Member -MemberType NoteProperty -Name "ParsedAuditData" -Value $auditData -Force -PassThru -ErrorAction Stop
                                     $allExports += $record
                                 }
                             }
-                        } catch {
+                        }
+                        catch {
                             Write-Host "Warning: Could not parse AuditData for record ID: $($record.Id)" -ForegroundColor Yellow
                         }
                     }
@@ -242,7 +261,8 @@ function Detect-MailboxExportEvents {
                 if ($batch.Count -eq $searchParams.ResultSize) {
                     $searchParams['SessionCommand'] = "ReturnNextPage"
                     $batch = Search-UnifiedAuditLog @searchParams
-                } else {
+                }
+                else {
                     $batch = $null
                 }
             }
@@ -251,17 +271,19 @@ function Detect-MailboxExportEvents {
         if ($allExports.Count -gt 0) {
             Write-Host "`nDETECTED $($allExports.Count) EXPORT OPERATIONS:" -ForegroundColor Red
             $allExports |
-                Select-Object @{N="Date";E={ $_.CreationDate.ToString("yyyy-MM-dd HH:mm") }},
-                              @{N="Actor";E={ if ($_.UserIds) { $_.UserIds[0] } else { "System" } }},
-                              @{N="Action";E={ $_.Operation }},
-                              @{N="Target";E={ $_.ObjectId }} |
-                Sort-Object Date -Descending |
-                Format-Table -AutoSize
+            Select-Object @{N = "Date"; E = { $_.CreationDate.ToString("yyyy-MM-dd HH:mm") } },
+            @{N = "Actor"; E = { if ($_.UserIds) { $_.UserIds[0] } else { "System" } } },
+            @{N = "Action"; E = { $_.Operation } },
+            @{N = "Target"; E = { $_.ObjectId } } |
+            Sort-Object Date -Descending |
+            Format-Table -AutoSize
             Write-Host "`nRecommended security actions:`n1. Verify that each export operation was authorized and legitimate.`n2. For suspicious exports, determine what data was exported and by whom.`n3. Review or implement approval processes for mailbox exports." -ForegroundColor Yellow
-        } else {
+        }
+        else {
             Write-Host "`nNo mailbox export activities detected in the specified time period." -ForegroundColor Green
         }
-    } catch {
+    }
+    catch {
         Write-Host "[ERROR] Error checking mailbox export events: $_" -ForegroundColor Red
     }
 }
@@ -287,11 +309,13 @@ $validPeriods = @("7", "30", "90")
 $daysInput = Read-Host "Enter the reporting period in days (7, 30, 90):"
 if ([string]::IsNullOrWhiteSpace($daysInput)) {
     $daysInput = 7
-} else {
+}
+else {
     if ($validPeriods -notcontains $daysInput) {
         Write-Host "[WARNING] Invalid period. Using default 7 days." -ForegroundColor Yellow
         $daysInput = 7
-    } else {
+    }
+    else {
         $daysInput = [int]$daysInput
     }
 }
@@ -312,10 +336,11 @@ do {
         }
         7 { 
             try {
-                Disconnect-ExchangeOnline -Confirm:$false
-                Disconnect-MgGraph
+                Disconnect-ExchangeOnline -Confirm:$false -ErrorAction Stop
+                Disconnect-MgGraph -ErrorAction Stop
                 Write-Host "[SUCCESS] Successfully disconnected from all services." -ForegroundColor Green
-            } catch {
+            }
+            catch {
                 Write-Host "[WARNING] Error during disconnect: $_" -ForegroundColor Yellow
             }
             Write-Host "Exiting. Stay secure!" -ForegroundColor Green 
