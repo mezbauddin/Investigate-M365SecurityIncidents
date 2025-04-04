@@ -1,12 +1,7 @@
 # Spot Privilege Escalations in Mailbox Permissions
 
-# Check if Exchange Online Management module is installed. If not, install it for the current user without prompting
-if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)) {
-    Install-Module ExchangeOnlineManagement -Scope CurrentUser -Force
-}
-
+# Import Exchange Online module and connect
 Import-Module ExchangeOnlineManagement
-
 Connect-ExchangeOnline -ShowBanner:$false
 
 # Prompt user for the period (7, 30, 90 days - 90 days)

@@ -1,5 +1,6 @@
 # Identify Anomalous Outbound Email Volumes
 
+# Import Microsoft Graph module
 Import-Module Microsoft.Graph
 
 #Prompt user for the period (7, 30, 90 days - max 90 days)

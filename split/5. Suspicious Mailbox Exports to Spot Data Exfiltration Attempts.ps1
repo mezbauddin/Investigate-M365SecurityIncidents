@@ -1,12 +1,7 @@
 # Detect Suspicious Mailbox Exports
 
-# Check if Exchange Online Management module is installed. If not, install it for the current user without prompting
-if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)) {
-    Install-Module -Name ExchangeOnlineManagement -Scope CurrentUser -Force
-}
-
+# Import Exchange Online module and connect
 Import-Module ExchangeOnlineManagement
-
 Connect-ExchangeOnline -ShowBanner:$false
 
 # Prompt user for a date range
