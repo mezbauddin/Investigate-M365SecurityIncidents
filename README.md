@@ -3,7 +3,7 @@
 A PowerShell script to help security administrators investigate and respond to potential security incidents in Microsoft 365 environments.
 
 ## Author
-Mezba Uddin | MVP | https://mezbauddin.com
+Mezba Uddin | MVP | https://mrmicrosoft.com
 
 ## Features
 
