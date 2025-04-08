@@ -1,46 +1,55 @@
 # Spot Privilege Escalations in Mailbox Permissions
 
-# Check if Exchange Online Management module is installed. If not, install it for the current user without prompting
-if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)) {
-    Install-Module ExchangeOnlineManagement -Scope CurrentUser -Force
+
+function Get-MailboxPermissionChanges {
+    Write-Host "`n[SCANNING] Checking for mailbox permission changes..." -ForegroundColor Yellow
+    try {
+        $UriBase = "https://graph.microsoft.com/v1.0/auditLogs/directoryAudits"
+        $Filter = "?`$filter=activityDisplayName eq 'Update mailbox permissions' and activityDateTime ge $($Global:StartDate) and activityDateTime le $($Global:EndDate)&`$orderby=activityDateTime desc&`$top=1000"
+        $Headers = @{ "ConsistencyLevel" = "eventual" }
+
+        $allResults = @()
+        $nextLink = "$UriBase$Filter"
+
+        do {
+            $response = Invoke-MgGraphRequest -Uri $nextLink -Headers $Headers -ErrorAction Stop
+            $allResults += $response.value
+            $nextLink = $response.'@odata.nextLink'
+        } while ($nextLink)
+
+        if ($allResults.Count -gt 0) {
+            $uniqueResults = $allResults | Sort-Object targetResources -Unique
+
+            $formatted = $uniqueResults | Sort-Object activityDateTime | ForEach-Object {
+                $targetResource = $_.targetResources[0]
+                $target = if ($targetResource.userPrincipalName) {
+                    $targetResource.userPrincipalName
+                } elseif ($targetResource.displayName) {
+                    $targetResource.displayName
+                } else {
+                    "Unknown"
+                }
+
+                [PSCustomObject]@{
+                    Date   = $_.activityDateTime
+                    Actor  = $_.initiatedBy.user.userPrincipalName
+                    Action = $_.activityDisplayName
+                    Target = $target
+                }
+            }
+
+            Write-Host "`n[INFO] Found $($formatted.Count) mailbox permission change events in the selected time frame:`n" -ForegroundColor Cyan
+            $formatted | Format-Table -AutoSize
+
+            $csvPath = "MailboxPermissionChanges_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv"
+            $formatted | Export-Csv -Path $csvPath -NoTypeInformation
+            Write-Host "`n[EXPORT] Audit log exported to: $csvPath" -ForegroundColor Green
+        }
+        else {
+            Write-Host "[INFO] No mailbox permission changes detected in the specified time period." -ForegroundColor Green
+        }
+    }
+    catch {
+        Write-Host "[ERROR] Error checking mailbox permission changes: $_" -ForegroundColor Red
+    }
 }
-
-Import-Module ExchangeOnlineManagement
-
-Connect-ExchangeOnline -ShowBanner:$false
-
-# Prompt user for the period (7, 30, 90 days)
-$validPeriods = @("7", "30", "90")
-do {
-    $selectedPeriod = Read-Host "Enter the reporting period in days (7, 30, 90)"
-} while ($selectedPeriod -notin $validPeriods)
-Write-Host "`nChecking for mailbox permission changes in the last $selectedPeriod days... Please wait." -ForegroundColor Cyan
-# Define time range
-$StartDate = (Get-Date).AddDays(-[int]$selectedPeriod)
-$EndDate   = Get-Date
-# Define relevant mailbox permission operations to search for
-$permissionActivities = @(
-    "Add-MailboxPermission", "Remove-MailboxPermission", "Set-MailboxPermission",
-    "Add-MailboxFolderPermission", "Remove-MailboxFolderPermission", "Set-MailboxFolderPermission"
-)
-# Perform the audit log search
-Write-Host "`nQuerying audit logs...." -ForegroundColor Yellow
-[array]$allPermissionChanges = Search-UnifiedAuditLog -StartDate $StartDate -EndDate $EndDate -Operations $permissionActivities -ResultSize 5000 
-Write-Host "`nSearch complete. Processing results..." -ForegroundColor Cyan
-# Display results
-if ($allPermissionChanges.Count -gt 0) {
-    Write-Host "`nFound $($allPermissionChanges.Count) mailbox permission change events in the last $selectedPeriod days:" -ForegroundColor Yellow
-    
-    $allPermissionChanges | Select-Object @{
-        Name="Date"; Expression={ $_.CreationDate.ToString("yyyy-MM-dd HH:mm") }
-    }, @{
-        Name="Actor"; Expression={ if ($_.UserIds) { ($_.UserIds -join ", ") } else { "System" } }
-    }, @{
-        Name="Action"; Expression={ $_.Operations }
-    }, @{
-        Name="Target"; Expression={ ($_ | Select-Object -ExpandProperty auditdata | ConvertFrom-Json).ObjectId }
-    } | Format-Table -AutoSize
-} else {
-    Write-Host "`nNo mailbox permission changes detected in the last $selectedPeriod days." -ForegroundColor Green
-}
-Write-Host "`nScan complete." -ForegroundColor Cyan

@@ -1,54 +1,31 @@
 # Identify Anomalous Outbound Email Volumes
 
-# Check if Microsoft.Graph module is installed. If not, install it for the current user.
-if (-not (Get-Module -ListAvailable -Name Microsoft.Graph)) {
-    Install-Module Microsoft.Graph -Scope CurrentUser -Force
+function Get-UnusualEmailVolume {
+    Write-Host "`n[SCANNING] Checking for unusual outbound email volume..." -ForegroundColor Yellow
+    try {
+        $Uri = "https://graph.microsoft.com/v1.0/reports/getEmailActivityUserDetail(period='D$Global:days')"
+        $outputPath = "$env:TEMP\email_activity_$(Get-Date -Format 'yyyyMMddHHmmss').csv"
+        Invoke-MgGraphRequest -Method GET -Uri $Uri -OutputFilePath $outputPath -ErrorAction Stop
+        if (Test-Path $outputPath) {
+            $parsed = Import-Csv $outputPath
+            $highVolumeSenders = $parsed | Where-Object { 
+                [int]::TryParse($_.SendCount, [ref]$null) -and [int]$_.SendCount -gt 100 
+            }
+            if ($highVolumeSenders) {
+                foreach ($sender in $highVolumeSenders) {
+                    Write-Host "[WARNING] $($sender.UserPrincipalName) sent $($sender.SendCount) emails in last ($Global:days) days." -ForegroundColor Red
+                }
+            }
+            else {
+                Write-Host "[INFO] No users with unusual email volume detected." -ForegroundColor Green
+            }
+            Remove-Item $outputPath -Force -ErrorAction SilentlyContinue
+        }
+        else {
+            Write-Host "[ERROR] Failed to retrieve email activity report." -ForegroundColor Red
+        }
+    }
+    catch {
+        Write-Host "[ERROR] Error retrieving email volume data: $_" -ForegroundColor Red
+    }
 }
-Import-Module Microsoft.Graph
-
-#Prompt user for the period (7, 30, 90, 180 days)
-$validPeriods = @("7", "30", "90", "180")
-do {
-    $selectedPeriod = Read-Host "Enter the reporting period in days (7, 30, 90, 180)"
-} while ($selectedPeriod -notin $validPeriods)
-
-#Construct the API URL based on the selected period
-$uri = "https://graph.microsoft.com/v1.0/reports/getEmailActivityUserDetail(period='D$selectedPeriod')"
-
-#Authenticate with Microsoft Graph (Ensure you're connected)
-Connect-MgGraph -Scopes "Reports.Read.All"
-
-Write-Host "Retrieving email activity report for the past $selectedPeriod days..." -ForegroundColor Cyan
-
-#Define output file path
-$outputPath = "$env:TEMP\email_activity_${selectedPeriod}days.csv"
-
-#Invoke the API request and save data to a CSV file
-Invoke-MgGraphRequest -Method GET -Uri $uri -OutputFilePath $outputPath
-
-#Threshold for high email volume (Adjust if needed)
-$threshold = 100
-
-Write-Host "Analyzing data for users sending more than $threshold emails in the past $selectedPeriod days..." -ForegroundColor Cyan
-
-#Import and filter email data
-$emailData = Import-Csv $outputPath 
-[array]$HighVolumeSenders = $emailData | Where-Object { 
-    [int]::TryParse($_.'Send Count', [ref]$null) -and [int]$_.'Send Count' -gt $threshold 
-} | Sort-Object { [int]$_.'Send Count' } -Descending
-
-#Display results
-if ($HighVolumeSenders.Count -gt 0) { 
-    Write-Host "`nFound $($HighVolumeSenders.Count) users sending high volumes of email (>$threshold)" -ForegroundColor Yellow
-    $HighVolumeSenders | Format-Table 'User Principal Name', @{Name="Sent";Expression={$_.'Send Count'}}, 'Last Activity Date' -AutoSize 
-} else { 
-    Write-Host "`nNo users found sending more than $threshold emails in the past $selectedPeriod days" -ForegroundColor Green 
-}
-
-#Remove temporary file
-Remove-Item $outputPath -Force -ErrorAction SilentlyContinue 
-
-Write-Host "Analysis complete" -ForegroundColor Cyan
-
-# Optional: Export results to a CSV file on Desktop
-#$HighVolumeSenders | Export-Csv "$env:USERPROFILE\Desktop\HighVolumeSenders_${selectedPeriod}days.csv" -NoTypeInformation
