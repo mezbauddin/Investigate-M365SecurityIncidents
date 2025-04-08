@@ -1,4 +1,4 @@
-# Recover Lost Intelligence by Identifying Critical Emails Deletion
+# Detect Suspicious Mailbox Access
 
 function  Get-MailboxAccess {
     try {
