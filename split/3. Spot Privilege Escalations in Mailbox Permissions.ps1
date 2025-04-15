@@ -1,55 +1,43 @@
 # Spot Privilege Escalations in Mailbox Permissions
 
+$periods = @("7", "30", "90")
+do { $days = Read-Host "Enter reporting period in days (7, 30, 90)" } while ($days -notin $periods)
 
-function Get-MailboxPermissionChanges {
-    Write-Host "`n[SCANNING] Checking for mailbox permission changes..." -ForegroundColor Yellow
-    try {
-        $UriBase = "https://graph.microsoft.com/v1.0/auditLogs/directoryAudits"
-        $Filter = "?`$filter=activityDisplayName eq 'Update mailbox permissions' and activityDateTime ge $($Global:StartDate) and activityDateTime le $($Global:EndDate)&`$orderby=activityDateTime desc&`$top=1000"
-        $Headers = @{ "ConsistencyLevel" = "eventual" }
-
-        $allResults = @()
-        $nextLink = "$UriBase$Filter"
-
-        do {
-            $response = Invoke-MgGraphRequest -Uri $nextLink -Headers $Headers -ErrorAction Stop
-            $allResults += $response.value
-            $nextLink = $response.'@odata.nextLink'
-        } while ($nextLink)
-
-        if ($allResults.Count -gt 0) {
-            $uniqueResults = $allResults | Sort-Object targetResources -Unique
-
-            $formatted = $uniqueResults | Sort-Object activityDateTime | ForEach-Object {
-                $targetResource = $_.targetResources[0]
-                $target = if ($targetResource.userPrincipalName) {
-                    $targetResource.userPrincipalName
-                } elseif ($targetResource.displayName) {
-                    $targetResource.displayName
-                } else {
-                    "Unknown"
-                }
-
-                [PSCustomObject]@{
-                    Date   = $_.activityDateTime
-                    Actor  = $_.initiatedBy.user.userPrincipalName
-                    Action = $_.activityDisplayName
-                    Target = $target
-                }
-            }
-
-            Write-Host "`n[INFO] Found $($formatted.Count) mailbox permission change events in the selected time frame:`n" -ForegroundColor Cyan
-            $formatted | Format-Table -AutoSize
-
-            $csvPath = "MailboxPermissionChanges_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv"
-            $formatted | Export-Csv -Path $csvPath -NoTypeInformation
-            Write-Host "`n[EXPORT] Audit log exported to: $csvPath" -ForegroundColor Green
-        }
-        else {
-            Write-Host "[INFO] No mailbox permission changes detected in the specified time period." -ForegroundColor Green
+$start = (Get-Date).AddDays(-[int]$days)
+$end = Get-Date
+$ops = @(
+    "Add-MailboxPermission", "Remove-MailboxPermission", "Set-MailboxPermission",
+    "Add-MailboxFolderPermission", "Remove-MailboxFolderPermission", "Set-MailboxFolderPermission"
+)
+Write-Host "`nSearching mailbox permission changes for the last $days days..." -ForegroundColor Cyan
+$sessionId = [guid]::NewGuid().ToString()
+$cmd = "Initialize"
+$results = @()
+do {
+    $batch = Search-UnifiedAuditLog -StartDate $start -EndDate $end -Operations $ops `
+        -ResultSize 5000 -SessionId $sessionId -SessionCommand $cmd
+    if ($batch) {
+        $results += $batch
+        $cmd = "ReturnNextPreviewPage"
+    }
+} while ($batch.Count -eq 5000)
+if ($results.Count -gt 0) {
+    Write-Host "`nFound $($results.Count) permission change events. Displaying and exporting..." -ForegroundColor Yellow
+    $parsed = $results | ForEach-Object {
+        $data = $_.AuditData | ConvertFrom-Json
+        [PSCustomObject]@{
+            Date       = $_.CreationDate.ToString("yyyy-MM-dd HH:mm")
+            Actor      = if ($_.UserIds) { ($_.UserIds -join ", ") } else { "System" }
+            Action     = ($_.Operations -join ", ")
+            Target     = $data.ObjectId
+            Cmdlet     = $data.Operation
+            Parameters = ($data.Parameters | ConvertTo-Json -Compress)
         }
     }
-    catch {
-        Write-Host "[ERROR] Error checking mailbox permission changes: $_" -ForegroundColor Red
-    }
+    $parsed | Format-Table -AutoSize
+    $parsed | Export-Csv -Path "MailboxPermissionChanges.csv" -NoTypeInformation -Encoding UTF8
+    Write-Host "`nExported to 'MailboxPermissionChanges.csv'" -ForegroundColor Green
+} else {
+    Write-Host "`nNo permission changes found." -ForegroundColor Green
 }
+Write-Host "`nMailbox permission audit completed successfully." -ForegroundColor Cyan
