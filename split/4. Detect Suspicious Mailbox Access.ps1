@@ -1,6 +1,6 @@
 # Detect Suspicious Mailbox Access
 
-ffunction Get-MailboxAccess {
+function Get-MailboxAccess {
     try {
         Write-Host "`n[SCANNING] Scanning for Suspicious Mailbox Access..." -ForegroundColor Yellow
 

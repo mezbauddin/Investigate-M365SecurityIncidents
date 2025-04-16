@@ -1,20 +1,15 @@
 # Spot Privilege Escalations in Mailbox Permissions
 
-$periods = @("7", "30", "90")
-do { $days = Read-Host "Enter reporting period in days (7, 30, 90)" } while ($days -notin $periods)
-
-$start = (Get-Date).AddDays(-[int]$days)
-$end = Get-Date
 $ops = @(
     "Add-MailboxPermission", "Remove-MailboxPermission", "Set-MailboxPermission",
     "Add-MailboxFolderPermission", "Remove-MailboxFolderPermission", "Set-MailboxFolderPermission"
 )
-Write-Host "`nSearching mailbox permission changes for the last $days days..." -ForegroundColor Cyan
+Write-Host "`nSearching mailbox permission changes from $Global:StartDate to $Global:EndDate..." -ForegroundColor Cyan
 $sessionId = [guid]::NewGuid().ToString()
 $cmd = "Initialize"
 $results = @()
 do {
-    $batch = Search-UnifiedAuditLog -StartDate $start -EndDate $end -Operations $ops `
+    $batch = Search-UnifiedAuditLog -StartDate $Global:StartDate -EndDate $Global:EndDate -Operations $ops `
         -ResultSize 5000 -SessionId $sessionId -SessionCommand $cmd
     if ($batch) {
         $results += $batch
