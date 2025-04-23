@@ -28,7 +28,7 @@ function Connect-ToServices {
         Import-Module Microsoft.Graph.Authentication
     }
     try {
-        Connect-MgGraph -Scopes "AuditLog.Read.All", "Mail.Read", "MailboxSettings.Read", "User.ReadWrite.All", "Mail.ReadBasic", "UserAuthenticationMethod.ReadWrite.All" -NoWelcome -ErrorAction Stop
+        Connect-MgGraph -Scopes "AuditLog.Read.All", "Mail.Read", "MailboxSettings.Read", "User.ReadWrite.All", "Mail.ReadBasic", "UserAuthenticationMethod.ReadWrite.All", "Reports.Read.All" -NoWelcome -ErrorAction Stop
         Write-Host "[SUCCESS] Connected to Microsoft Graph!" -ForegroundColor Green
     }
     catch {
